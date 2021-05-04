@@ -21,7 +21,7 @@ json :: (FromJSON a, ToJSON a) => ContentType a
 json = ContentType
     { toContentType = encode
     , fromContentType = decode
-    , mediaTypes = pure ("application" // "json")
+    , mediaTypes = NE.fromList ["application" // "json"]
     }
 
 acceptHeader :: NonEmpty (ContentType a) -> Header

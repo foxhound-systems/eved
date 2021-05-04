@@ -7,6 +7,7 @@ module Web.Eved.Client
 
 import           Control.Monad.Reader
 import           Data.List.NonEmpty   (NonEmpty (..))
+import           Data.Maybe           (mapMaybe)
 import           Data.Text            (Text)
 import qualified Data.Text            as T
 import           Data.Text.Encoding   (encodeUtf8)
@@ -54,8 +55,20 @@ instance Eved EvedClient ClientM where
         client next req{HttpClient.queryString =
             let query = parseQuery $ HttpClient.queryString req
                 queryText = queryToQueryText query
-                newArg = (HttpApiData.toUrlPiece argName, Just $ QP.toQueryParam el a)
-            in renderQuery False $ queryTextToQuery (newArg:queryText)}
+                newQuery = case QP.toQueryParam el a of
+                             Just v ->
+                                let newArg = (HttpApiData.toUrlPiece argName, Just v)
+                                in newArg:queryText
+                             Nothing ->
+                                queryText
+            in renderQuery False $ queryTextToQuery newQuery}
+
+    queryParams argName el next = EvedClient $ \req as ->
+        client next req{HttpClient.queryString =
+            let query = parseQuery $ HttpClient.queryString req
+                queryText = queryToQueryText query
+                newArgs = mapMaybe ( fmap (\v -> (HttpApiData.toUrlPiece argName, Just v)) . QP.toQueryParam el ) as
+            in renderQuery False $ queryTextToQuery (newArgs <> queryText)}
 
     verb method _status ctypes = EvedClient $ \req -> ClientM $ do
         let reqWithMethod = req{ HttpClient.method = renderStdMethod method

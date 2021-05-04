@@ -8,6 +8,8 @@ module Web.Eved.Server
 
 import           Control.Monad
 import           Control.Monad.IO.Class
+import           Data.Functor           ((<&>))
+import           Data.Maybe             (catMaybes)
 import           Data.String            (IsString (..))
 import           Data.Text              (Text)
 import qualified Data.Text              as T
@@ -67,6 +69,15 @@ instance Eved (EvedScottyT m) m where
             case mArg of
               Right arg -> fmap ($ arg) action
               Left _    -> Scotty.next
+
+    queryParams s qp next = EvedScottyT $ \nt r action ->
+        unEvedScottyT next nt r $
+            Scotty.params
+                <&> filter (\(k, _) -> k == TL.fromStrict s)
+                <&> fmap (\(_, v) -> QP.fromQueryParam qp (TL.toStrict v))
+                <&> fmap (either (const Nothing) Just)
+                <&> catMaybes
+                >>= (\x -> fmap ($ x) action)
 
     verb method status ctypes = EvedScottyT $ \nt r action ->
         Scotty.addroute method (fromString $ T.unpack r) $ do
