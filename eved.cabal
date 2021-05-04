@@ -21,6 +21,7 @@ library
                        Web.Eved.Internal
                        Web.Eved.QueryParam
                        Web.Eved.Server
+                       Web.Eved.Options
                        Web.Eved.UrlElement
   build-depends:       base >= 4.7 && < 5
                      , aeson
