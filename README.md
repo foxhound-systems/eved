@@ -11,11 +11,10 @@ Eved is highly extensible (both in terms of implementations and new terms) thank
 
 ```haskell
 import           Data.Text              (Text)
+import           Web.Eved
 import qualified Web.Eved.ContentType   as CT
 import qualified Web.Eved.QueryParam    as QP
 import qualified Web.Eved.UrlElement    as UE
-
-import           Web.Eved.Internal
 
 type Api m =
        (Integer -> Integer -> m Integer)
