@@ -9,14 +9,14 @@ data UrlElement a = UrlElement
     , toUrlPiece   :: a -> Text
     }
 
-auto :: (HttpApiData.FromHttpApiData a, HttpApiData.ToHttpApiData a) => UrlElement a
-auto = UrlElement
+auto :: (HttpApiData.FromHttpApiData a, HttpApiData.ToHttpApiData a, Applicative f) => f (UrlElement a)
+auto = pure $ UrlElement
     { fromUrlPiece = HttpApiData.parseUrlPiece
     , toUrlPiece = HttpApiData.toUrlPiece
     }
 
-integer :: UrlElement Integer
+integer :: Applicative f => f (UrlElement Integer)
 integer = auto
 
-text :: UrlElement Text
+text :: Applicative f => f (UrlElement Text)
 text = auto

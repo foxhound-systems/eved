@@ -17,8 +17,8 @@ data ContentType a = ContentType
     , mediaTypes      :: NonEmpty MediaType
     }
 
-json :: (FromJSON a, ToJSON a) => ContentType a
-json = ContentType
+json :: (FromJSON a, ToJSON a, Applicative f) => f (ContentType a)
+json = pure $ ContentType
     { toContentType = encode
     , fromContentType = decode
     , mediaTypes = NE.fromList ["application" // "json"]

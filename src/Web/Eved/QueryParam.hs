@@ -10,21 +10,22 @@ data QueryParam a = QueryParam
     , toQueryParam   :: a -> Maybe Text
     }
 
-auto :: (HttpApiData.FromHttpApiData a, HttpApiData.ToHttpApiData a) => QueryParam a
-auto = QueryParam
+auto :: (Applicative f, HttpApiData.FromHttpApiData a, HttpApiData.ToHttpApiData a) => f (QueryParam a)
+auto = pure $ QueryParam
     { fromQueryParam = HttpApiData.parseQueryParam
     , toQueryParam = Just . HttpApiData.toQueryParam
     }
 
-maybe :: QueryParam a -> QueryParam (Maybe a)
-maybe qp =
+maybe :: Functor f => f (QueryParam a) -> f (QueryParam (Maybe a))
+maybe = fmap $ \qp ->
     QueryParam
-        { fromQueryParam = either (const $ Right Nothing) (Right . Just) . (fromQueryParam qp)
-        , toQueryParam = (=<<) (toQueryParam qp)
-        }
+    { fromQueryParam = either (const $ Right Nothing) (Right . Just) . (fromQueryParam qp)
+    , toQueryParam = (=<<) (toQueryParam qp)
+    }
 
-integer :: QueryParam Integer
+integer :: Applicative f => f (QueryParam Integer)
 integer = auto
 
-text :: QueryParam Text
+text :: Applicative f => f (QueryParam Text)
 text = auto
+

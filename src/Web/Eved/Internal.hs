@@ -26,15 +26,3 @@ class Eved api m | api -> m where
     queryParam :: Text -> QueryParam a -> api b -> api (a -> b)
     queryParams :: Text -> QueryParam a -> api b -> api ([a] -> b)
     verb :: StdMethod -> Status -> NonEmpty (ContentType a) -> api (m a)
-
-(.</>) :: Eved api m => (api a -> api b) -> api a -> api b
-(.</>) = ($)
-infixr 5 .</>
-
-get, post, put, patch, delete :: Eved api m => NonEmpty (ContentType a) -> api (m a)
-get = verb GET status200
-post = verb POST status200
-put = verb PUT status200
-patch = verb PATCH status200
-delete = verb DELETE status200
-

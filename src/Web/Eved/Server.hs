@@ -15,6 +15,7 @@ import           Data.Text              (Text)
 import qualified Data.Text              as T
 import           Data.Text.Encoding     (decodeUtf8, encodeUtf8)
 import qualified Data.Text.Lazy         as TL
+import           Data.Void              (Void, absurd)
 import           Network.HTTP.Media     (renderHeader)
 import           Network.HTTP.Types     (badRequest400, notAcceptable406,
                                          unsupportedMediaType415)
