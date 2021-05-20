@@ -52,30 +52,30 @@ noContext = runIdentity
 (.<|>) = liftA2 (I..<|>)
 
 -- |Add a Literal string to the path of the api
-lit :: (I.Eved api m, Applicative f) => Text -> f (api a -> api a)
-lit l = pure $ I.lit l
+lit :: (I.Eved api m, Applicative f) => Text -> f (api a) -> f (api a)
+lit l = fmap (I.lit l)
 
 -- |Add a url capture with a given name and UrlElement decoder/encoder
-capture :: (I.Eved api m, Applicative f) => Text -> f (UE.UrlElement a) -> f (api b -> api (a -> b))
-capture t u = fmap (I.capture t) u
+capture :: (I.Eved api m, Applicative f) => Text -> f (UE.UrlElement a) -> f (api b) -> f (api (a -> b))
+capture t u next = I.capture t <$> u <*> next
 
 -- |Add a request body parser for the given content types
 -- The Content-Type header will be examined to assist in content negotiation.
-reqBody :: (I.Eved api m, Applicative f) => NonEmpty (f (CT.ContentType a)) -> f (api b -> api (a -> b))
-reqBody ctyps = fmap I.reqBody $ sequenceA ctyps
+reqBody :: (I.Eved api m, Applicative f) => NonEmpty (f (CT.ContentType a)) -> f (api b) -> f (api (a -> b))
+reqBody ctyps next = I.reqBody <$> sequenceA ctyps <*> next
 
 -- |A single query param that is required to exist. If the argument isnt required us QP.maybe
-queryParam :: (I.Eved api m, Applicative f) => Text -> f (QP.QueryParam a) -> f (api b -> api (a -> b))
-queryParam t q = fmap (I.queryParam t) q
+queryParam :: (I.Eved api m, Applicative f) => Text -> f (QP.QueryParam a) -> f (api b) -> f (api (a -> b))
+queryParam t q next = I.queryParam t <$> q <*> next
 
 -- |A list of query params with the same name (may return an empty list if the param is not specified ever)
-queryParams :: (I.Eved api m, Applicative f) => Text -> f (QP.QueryParam a) -> f (api b -> api ([a] -> b))
-queryParams t q = fmap (I.queryParams t) q
+queryParams :: (I.Eved api m, Applicative f) => Text -> f (QP.QueryParam a) -> f (api b) -> f (api ([a] -> b))
+queryParams t q next = I.queryParams t <$> q <*> next
 
 -- |The leaf node of most routes, this will specify the HTTP Verb and Status along with a list of ContentType encoder/decoders.
 -- The Allow header in the request will be examined to determine a suitable response Content-Type
 verb :: (I.Eved api m, Applicative f) => StdMethod -> Status -> NonEmpty (f (CT.ContentType a)) -> f (api (m a))
-verb m s cty = fmap (I.verb m s) (sequenceA cty)
+verb m s ctyps = fmap (I.verb m s) (sequenceA ctyps)
 
 get, post, put, patch, delete :: (I.Eved api m, Applicative f) => NonEmpty (f (CT.ContentType a)) -> f (api (m a))
 -- | HTTP GET -- see verb for more info
@@ -91,7 +91,7 @@ delete = verb DELETE status200
 
 -- |A Segment seperator to be used between path segments akin to / in a url
 -- e.g. lit "hello" .</> capture "name" UE.text .</> get [CT.json @Text]
-(.</>) :: (Applicative f, I.Eved api m) =>  f (api a -> api b) -> f (api a) -> f (api b)
-(.</>) = (<*>)
+(.</>) :: (Applicative f, I.Eved api m) =>  (f (api a) -> f (api b)) -> f (api a) -> f (api b)
+(.</>) = ($)
 infixr 5 .</>
 
