@@ -24,5 +24,4 @@ class Eved api m | api -> m where
     capture :: Text -> UrlElement a -> api b -> api (a -> b)
     reqBody :: NonEmpty (ContentType a) -> api b -> api (a -> b)
     queryParam :: Text -> QueryParam a -> api b -> api (a -> b)
-    queryParams :: Text -> QueryParam a -> api b -> api ([a] -> b)
     verb :: StdMethod -> Status -> NonEmpty (ContentType a) -> api (m a)

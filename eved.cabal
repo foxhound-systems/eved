@@ -1,5 +1,5 @@
 name:                eved
-version:             0.1.0.0
+version:             0.0.1.0
 -- synopsis:
 -- description:
 homepage:            https://github.com/foxhound-systems/eved#readme
@@ -22,6 +22,7 @@ library
                        Web.Eved.Internal
                        Web.Eved.QueryParam
                        Web.Eved.Server
+                       Web.Eved.FlatServer
                        Web.Eved.Options
                        Web.Eved.UrlElement
   build-depends:       base >= 4.7 && < 5

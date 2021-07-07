@@ -51,23 +51,11 @@ instance Eved EvedClient ClientM where
         client next req{ HttpClient.requestBody = HttpClient.RequestBodyLBS (CT.toContentType ctype a)
                        , HttpClient.requestHeaders = (CT.contentTypeHeader ctype):HttpClient.requestHeaders req
                        }
-    queryParam argName el next = EvedClient $ \req a ->
+    queryParam argName el next = EvedClient $ \req val ->
         client next req{HttpClient.queryString =
             let query = parseQuery $ HttpClient.queryString req
                 queryText = queryToQueryText query
-                newQuery = case QP.toQueryParam el a of
-                             Just v ->
-                                let newArg = (HttpApiData.toUrlPiece argName, Just v)
-                                in newArg:queryText
-                             Nothing ->
-                                queryText
-            in renderQuery False $ queryTextToQuery newQuery}
-
-    queryParams argName el next = EvedClient $ \req as ->
-        client next req{HttpClient.queryString =
-            let query = parseQuery $ HttpClient.queryString req
-                queryText = queryToQueryText query
-                newArgs = mapMaybe ( fmap (\v -> (HttpApiData.toUrlPiece argName, Just v)) . QP.toQueryParam el ) as
+                newArgs = fmap (\v -> (HttpApiData.toUrlPiece argName, Just v)) $ QP.toQueryParam el val
             in renderQuery False $ queryTextToQuery (newArgs <> queryText)}
 
     verb method _status ctypes = EvedClient $ \req -> ClientM $ do

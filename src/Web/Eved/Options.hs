@@ -47,8 +47,6 @@ instance Eved (EvedOptions m) m where
 
     reqBody _ = passthrough
     queryParam _ _ = passthrough
-    queryParams _ _ = passthrough
-
     verb method _ _ = EvedOptions $ \path ->
         case path of
           [] -> [method]

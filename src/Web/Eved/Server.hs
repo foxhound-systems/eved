@@ -64,21 +64,13 @@ instance Eved (EvedScottyT m) m where
               Nothing ->
                   Scotty.raiseStatus unsupportedMediaType415 ""
 
-    queryParam s el next = EvedScottyT $ \nt r action ->
+    queryParam s qp next = EvedScottyT $ \nt r action ->
         unEvedScottyT next nt r $ do
-            mArg <- fmap (QP.fromQueryParam el) $ Scotty.param $ TL.fromStrict s
-            case mArg of
-              Right arg -> fmap ($ arg) action
-              Left _    -> Scotty.next
-
-    queryParams s qp next = EvedScottyT $ \nt r action ->
-        unEvedScottyT next nt r $
-            Scotty.params
-                <&> filter (\(k, _) -> k == TL.fromStrict s)
-                <&> fmap (\(_, v) -> QP.fromQueryParam qp (TL.toStrict v))
-                <&> fmap (either (const Nothing) Just)
-                <&> catMaybes
-                >>= (\x -> fmap ($ x) action)
+            ps <- Scotty.params <&> filter (\(k, _) -> k == TL.fromStrict s)
+            let vals = fmap (TL.toStrict . snd) ps
+            case QP.fromQueryParam qp vals of
+              Right v  -> fmap ($ v) action
+              Left err -> Scotty.next
 
     verb method status ctypes = EvedScottyT $ \nt r action ->
         Scotty.addroute method (fromString $ T.unpack r) $ do
