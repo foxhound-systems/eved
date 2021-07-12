@@ -1,7 +1,7 @@
 name:                eved
 version:             0.0.1.0
--- synopsis:
--- description:
+synopsis:            A value level web framework
+description:         A value level web framework in the style of servant
 homepage:            https://github.com/foxhound-systems/eved#readme
 license:             BSD3
 license-file:        LICENSE
@@ -35,6 +35,7 @@ library
                      , scotty
                      , text
                      , wai
+                     , warp
 
   default-language:    Haskell2010
 

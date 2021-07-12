@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveFunctor         #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings     #-}
@@ -6,10 +7,14 @@
 module Web.Eved.Server
     where
 
+import           Control.Applicative    ((<|>))
+import           Control.Exception      (Exception, catch, throwIO)
 import           Control.Monad
 import           Control.Monad.IO.Class
+import           Data.ByteString.Lazy   (ByteString)
 import           Data.Functor           ((<&>))
-import           Data.Maybe             (catMaybes)
+import qualified Data.List.NonEmpty     as NE
+import           Data.Maybe             (catMaybes, fromMaybe)
 import           Data.String            (IsString (..))
 import           Data.Text              (Text)
 import qualified Data.Text              as T
@@ -17,13 +22,139 @@ import           Data.Text.Encoding     (decodeUtf8, encodeUtf8)
 import qualified Data.Text.Lazy         as TL
 import           Data.Void              (Void, absurd)
 import           Network.HTTP.Media     (renderHeader)
-import           Network.HTTP.Types     (badRequest400, notAcceptable406,
+import           Network.HTTP.Types     (badRequest400, hAccept, hContentType,
+                                         notAcceptable406, queryToQueryText,
+                                         renderStdMethod,
                                          unsupportedMediaType415)
 import qualified Web.Eved.ContentType   as CT
 import           Web.Eved.Internal
 import qualified Web.Eved.QueryParam    as QP
 import qualified Web.Eved.UrlElement    as UE
 import qualified Web.Scotty             as Scotty
+
+
+import           Network.Wai            (Application, lazyRequestBody, pathInfo,
+                                         queryString, requestHeaders,
+                                         requestMethod, responseLBS)
+
+data RequestData a
+  = BodyRequestData (ByteString -> Maybe a)
+  | PureRequestData a
+  deriving Functor
+
+newtype EvedServerT m a = EvedServerT
+    { unEvedServerT :: (forall a. m a -> IO a) -> [Text] -> IO (RequestData a) -> Application }
+
+serverApplication :: (forall a. m a -> IO a) -> a -> EvedServerT m a -> Application
+serverApplication nt handlers api req =
+    unEvedServerT api nt (pathInfo req) (pure (PureRequestData handlers)) req
+
+data PathError = PathError
+    deriving Show
+newtype CaptureError = CaptureError Text
+    deriving Show
+data NoContentMatchError = NoContentMatchError
+    deriving Show
+newtype QueryParamParseError = QueryParamParseError Text
+    deriving Show
+data PathNotExhaustedError = PathNotExhaustedError
+    deriving Show
+data NoAcceptMatchError = NoAcceptMatchError
+    deriving Show
+data NoMethodMatchError = NoMethodMatchError
+    deriving Show
+data BodyParseError = BodyParseError
+    deriving Show
+
+instance Exception PathError
+instance Exception CaptureError
+instance Exception NoContentMatchError
+instance Exception QueryParamParseError
+instance Exception PathNotExhaustedError
+instance Exception NoAcceptMatchError
+instance Exception NoMethodMatchError
+instance Exception BodyParseError
+
+instance Eved (EvedServerT m) m where
+    a .<|> b = EvedServerT $ \nt path requestData req resp -> do
+        let applicationA = unEvedServerT a nt path (fmap (fmap (\(l :<|> _) -> l)) requestData)
+            applicationB = unEvedServerT b nt path (fmap (fmap (\(_ :<|> r) -> r)) requestData)
+        resultA <- (Just <$> applicationA req resp)
+                     `catch` (\PathError -> pure Nothing)
+                     `catch` (\(CaptureError _) -> pure Nothing)
+                     `catch` (\NoContentMatchError -> pure Nothing)
+                     `catch` (\(QueryParamParseError _) -> pure Nothing)
+                     `catch` (\PathNotExhaustedError -> pure Nothing)
+                     `catch` (\NoAcceptMatchError -> pure Nothing)
+                     `catch` (\NoMethodMatchError -> pure Nothing)
+        maybe (applicationB req resp) pure resultA
+
+    lit s next = EvedServerT $ \nt path action ->
+        case path of
+            x:rest | x == s -> unEvedServerT next nt rest action
+            _               -> \_ _ -> throwIO PathError
+    capture _s el next = EvedServerT $ \nt path action ->
+        case path of
+          x:rest ->
+              case UE.fromUrlPiece el x of
+                Right arg ->
+                    unEvedServerT next nt rest $ fmap (fmap ($ arg)) action
+                Left err -> \_ _ -> throwIO $ CaptureError err
+          _ -> \_ _ -> throwIO PathError
+
+    reqBody ctypes next = EvedServerT $ \nt path action req -> do
+        let mContentTypeBS = lookup hContentType $ requestHeaders req
+        case mContentTypeBS of
+              Just contentTypeBS ->
+                case CT.chooseContentCType ctypes contentTypeBS of
+                      Just bodyParser ->
+                          unEvedServerT next nt path (fmap (addBodyParser bodyParser) action) req
+                      Nothing ->
+                            \_ -> throwIO NoContentMatchError
+              Nothing ->
+                  unEvedServerT next nt path (fmap (addBodyParser (CT.fromContentType (NE.head ctypes))) action) req
+
+       where
+            addBodyParser bodyParser action =
+                case action of
+                  BodyRequestData fn -> BodyRequestData $ \bodyText -> fn bodyText <*> bodyParser bodyText
+                  PureRequestData v -> BodyRequestData $ \bodyText -> v <$> bodyParser bodyText
+
+    queryParam s qp next = EvedServerT $ \nt path action req ->
+       let queryText = queryToQueryText (queryString req)
+           params = fromMaybe "true" . snd <$> filter (\(k, _) -> k == s) queryText
+       in case QP.fromQueryParam qp params of
+            Right a  -> unEvedServerT next nt path (fmap (fmap ($a)) action) req
+            Left err -> \_ -> throwIO $ QueryParamParseError err
+
+    verb method status ctypes = EvedServerT $ \nt path action req resp ->
+        case path of
+            [] -> do
+                unless (renderStdMethod method == requestMethod req) $
+                    throwIO NoMethodMatchError
+                requestData <- action
+                (ctype, renderContent) <- case lookup hAccept $ requestHeaders req of
+                          Just acceptBS ->
+                            case CT.chooseAcceptCType ctypes acceptBS of
+                              Just (ctype, renderContent) -> pure (ctype, renderContent)
+                              Nothing -> throwIO NoAcceptMatchError
+                          Nothing ->
+                              let ctype = NE.head ctypes
+                              in pure (NE.head $ CT.mediaTypes ctype, CT.toContentType ctype)
+
+
+                responseData <- case requestData of
+                                  BodyRequestData fn -> do
+                                      reqBody <- lazyRequestBody req
+                                      case fn reqBody of
+                                        Just res -> nt res
+                                        Nothing  -> throwIO BodyParseError
+                                  PureRequestData a ->
+                                      nt a
+
+                resp $ responseLBS status [(hContentType, renderHeader ctype)] (renderContent responseData)
+            _ ->
+                throwIO PathNotExhaustedError
 
 newtype EvedScottyT m a = EvedScottyT
     { unEvedScottyT :: (forall a. m a -> IO a) -> Text -> Scotty.ActionM a -> Scotty.ScottyM ()
@@ -81,6 +212,7 @@ instance Eved (EvedScottyT m) m where
               Just (ctype, renderContent) -> do
                   Scotty.setHeader "Content-Type" (TL.fromStrict $ decodeUtf8 $ renderHeader ctype)
                   Scotty.status status
-                  join (fmap (liftIO . nt) action) >>= (Scotty.raw . renderContent)
+                  action >>= liftIO . nt
+                         >>= Scotty.raw . renderContent
               Nothing ->
                   Scotty.raiseStatus notAcceptable406 mempty
