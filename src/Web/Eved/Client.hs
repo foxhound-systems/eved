@@ -67,7 +67,7 @@ instance Eved EvedClient ClientM where
         let mBodyParser = CT.chooseContentCType ctypes =<< (lookup hContentType $ HttpClient.responseHeaders resp)
         case mBodyParser of
           Just bodyParser  -> case bodyParser (HttpClient.responseBody resp) of
-                                Just a -> pure a
-                                Nothing -> error "Unimplemented: Content-Type matched but parse failed"
+                                Right a -> pure a
+                                Left _ -> error "Unimplemented: Content-Type matched but parse failed"
           Nothing -> error "Unimplemented: No Matching Content-Type"
 

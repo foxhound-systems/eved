@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveFunctor         #-}
 {-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE RankNTypes            #-}
@@ -12,6 +13,7 @@ import           Control.Exception      (Exception, catch, throwIO)
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Data.ByteString.Lazy   (ByteString)
+import qualified Data.ByteString.Lazy   as LBS
 import           Data.Functor           ((<&>))
 import qualified Data.List.NonEmpty     as NE
 import           Data.Maybe             (catMaybes, fromMaybe)
@@ -38,7 +40,7 @@ import           Network.Wai            (Application, lazyRequestBody, pathInfo,
                                          requestMethod, responseLBS)
 
 data RequestData a
-  = BodyRequestData (ByteString -> Maybe a)
+  = BodyRequestData (ByteString -> Either Text a)
   | PureRequestData a
   deriving Functor
 
@@ -63,8 +65,6 @@ data NoAcceptMatchError = NoAcceptMatchError
     deriving Show
 data NoMethodMatchError = NoMethodMatchError
     deriving Show
-data BodyParseError = BodyParseError
-    deriving Show
 
 instance Exception PathError
 instance Exception CaptureError
@@ -73,21 +73,12 @@ instance Exception QueryParamParseError
 instance Exception PathNotExhaustedError
 instance Exception NoAcceptMatchError
 instance Exception NoMethodMatchError
-instance Exception BodyParseError
 
 instance Eved (EvedServerT m) m where
     a .<|> b = EvedServerT $ \nt path requestData req resp -> do
         let applicationA = unEvedServerT a nt path (fmap (fmap (\(l :<|> _) -> l)) requestData)
             applicationB = unEvedServerT b nt path (fmap (fmap (\(_ :<|> r) -> r)) requestData)
-        resultA <- (Just <$> applicationA req resp)
-                     `catch` (\PathError -> pure Nothing)
-                     `catch` (\(CaptureError _) -> pure Nothing)
-                     `catch` (\NoContentMatchError -> pure Nothing)
-                     `catch` (\(QueryParamParseError _) -> pure Nothing)
-                     `catch` (\PathNotExhaustedError -> pure Nothing)
-                     `catch` (\NoAcceptMatchError -> pure Nothing)
-                     `catch` (\NoMethodMatchError -> pure Nothing)
-        maybe (applicationB req resp) pure resultA
+        applicationA req resp <|> applicationB req resp
 
     lit s next = EvedServerT $ \nt path action ->
         case path of
@@ -132,27 +123,32 @@ instance Eved (EvedServerT m) m where
             [] -> do
                 unless (renderStdMethod method == requestMethod req) $
                     throwIO NoMethodMatchError
-                requestData <- action
-                (ctype, renderContent) <- case lookup hAccept $ requestHeaders req of
-                          Just acceptBS ->
-                            case CT.chooseAcceptCType ctypes acceptBS of
-                              Just (ctype, renderContent) -> pure (ctype, renderContent)
-                              Nothing -> throwIO NoAcceptMatchError
-                          Nothing ->
-                              let ctype = NE.head ctypes
-                              in pure (NE.head $ CT.mediaTypes ctype, CT.toContentType ctype)
 
+                (ctype, renderContent) <-
+                        case lookup hAccept $ requestHeaders req of
+                              Just acceptBS ->
+                                case CT.chooseAcceptCType ctypes acceptBS of
+                                  Just (ctype, renderContent) -> pure (ctype, renderContent)
+                                  Nothing -> throwIO NoAcceptMatchError
+                              Nothing ->
+                                  let ctype = NE.head ctypes
+                                  in pure (NE.head $ CT.mediaTypes ctype, CT.toContentType ctype)
 
-                responseData <- case requestData of
+                -- We are now committed since you can only read the body once
+                eResponseData <- action >>= \case
                                   BodyRequestData fn -> do
                                       reqBody <- lazyRequestBody req
                                       case fn reqBody of
-                                        Just res -> nt res
-                                        Nothing  -> throwIO BodyParseError
+                                        Right res -> Right <$> nt res
+                                        Left err  -> pure $ Left err
                                   PureRequestData a ->
-                                      nt a
+                                      Right <$> nt a
 
-                resp $ responseLBS status [(hContentType, renderHeader ctype)] (renderContent responseData)
+                case eResponseData of
+                  Right responseData ->
+                    resp $ responseLBS status [(hContentType, renderHeader ctype)] (renderContent responseData)
+                  Left err ->
+                    resp $ responseLBS badRequest400 [] (LBS.fromStrict $ encodeUtf8 err)
             _ ->
                 throwIO PathNotExhaustedError
 
@@ -188,10 +184,10 @@ instance Eved (EvedScottyT m) m where
               Just bodyParser  -> do
                   requestBody <- Scotty.body
                   case bodyParser requestBody of
-                      Just a ->
+                      Right a ->
                           fmap ($ a) action
-                      Nothing ->
-                          Scotty.raiseStatus badRequest400 ""
+                      Left err ->
+                          Scotty.raiseStatus badRequest400 (TL.fromStrict err)
               Nothing ->
                   Scotty.raiseStatus unsupportedMediaType415 ""
 
