@@ -25,7 +25,8 @@ import qualified Data.Text.Lazy         as TL
 import           Data.Void              (Void, absurd)
 import           Network.HTTP.Media     (renderHeader)
 import           Network.HTTP.Types     (badRequest400, hAccept, hContentType,
-                                         notAcceptable406, queryToQueryText,
+                                         methodNotAllowed405, notAcceptable406,
+                                         notFound404, queryToQueryText,
                                          renderStdMethod,
                                          unsupportedMediaType415)
 import qualified Web.Eved.ContentType   as CT
@@ -48,8 +49,14 @@ newtype EvedServerT m a = EvedServerT
     { unEvedServerT :: (forall a. m a -> IO a) -> [Text] -> IO (RequestData a) -> Application }
 
 serverApplication :: (forall a. m a -> IO a) -> a -> EvedServerT m a -> Application
-serverApplication nt handlers api req =
-    unEvedServerT api nt (pathInfo req) (pure (PureRequestData handlers)) req
+serverApplication nt handlers api req resp =
+    unEvedServerT api nt (pathInfo req) (pure (PureRequestData handlers)) req resp
+        `catch` (\PathError -> resp $ responseLBS notFound404 [] "Not Found")
+        `catch` (\(CaptureError err) -> resp $ responseLBS badRequest400 [] (LBS.fromStrict $ encodeUtf8 err))
+        `catch` (\(QueryParamParseError err) -> resp $ responseLBS badRequest400 [] (LBS.fromStrict $ encodeUtf8 err))
+        `catch` (\NoContentMatchError -> resp $ responseLBS unsupportedMediaType415 [] "Unsupported Media Type")
+        `catch` (\NoAcceptMatchError -> resp $ responseLBS notAcceptable406 [] "Not Acceptable")
+        `catch` (\NoMethodMatchError -> resp $ responseLBS methodNotAllowed405 [] "Method Not Allowed")
 
 data PathError = PathError
     deriving Show
@@ -58,8 +65,6 @@ newtype CaptureError = CaptureError Text
 data NoContentMatchError = NoContentMatchError
     deriving Show
 newtype QueryParamParseError = QueryParamParseError Text
-    deriving Show
-data PathNotExhaustedError = PathNotExhaustedError
     deriving Show
 data NoAcceptMatchError = NoAcceptMatchError
     deriving Show
@@ -70,7 +75,6 @@ instance Exception PathError
 instance Exception CaptureError
 instance Exception NoContentMatchError
 instance Exception QueryParamParseError
-instance Exception PathNotExhaustedError
 instance Exception NoAcceptMatchError
 instance Exception NoMethodMatchError
 
@@ -150,7 +154,7 @@ instance Eved (EvedServerT m) m where
                   Left err ->
                     resp $ responseLBS badRequest400 [] (LBS.fromStrict $ encodeUtf8 err)
             _ ->
-                throwIO PathNotExhaustedError
+                throwIO PathError
 
 newtype EvedScottyT m a = EvedScottyT
     { unEvedScottyT :: (forall a. m a -> IO a) -> Text -> Scotty.ActionM a -> Scotty.ScottyM ()
