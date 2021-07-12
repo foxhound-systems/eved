@@ -40,12 +40,12 @@ data RequestData a
   deriving Functor
 
 newtype EvedServerT m a = EvedServerT
-    { unEvedServerT :: (forall a. m a -> IO a) -> [Text] -> IO (RequestData a) -> (SomeException -> ServerError) -> Application }
+    { unEvedServerT :: (forall a. m a -> IO a) -> [Text] -> RequestData a -> (SomeException -> ServerError) -> Application }
 
 
 server :: (forall a. m a -> IO a) -> a -> EvedServerT m a -> Application
 server nt handlers api req resp =
-    unEvedServerT api nt (pathInfo req) (pure (PureRequestData handlers)) defaultErrorHandler req resp
+    unEvedServerT api nt (pathInfo req) (PureRequestData handlers) defaultErrorHandler req resp
         `catch` (\PathError -> resp $ responseLBS notFound404 [] "Not Found")
         `catch` (\(CaptureError err) -> resp $ responseLBS badRequest400 [] (LBS.fromStrict $ encodeUtf8 err))
         `catch` (\(QueryParamParseError err) -> resp $ responseLBS badRequest400 [] (LBS.fromStrict $ encodeUtf8 err))
@@ -75,8 +75,8 @@ instance Exception NoMethodMatchError
 
 instance Eved (EvedServerT m) m where
     a .<|> b = EvedServerT $ \nt path requestData errorHandler req resp -> do
-        let applicationA = unEvedServerT a nt path (fmap (fmap (\(l :<|> _) -> l)) requestData)
-            applicationB = unEvedServerT b nt path (fmap (fmap (\(_ :<|> r) -> r)) requestData)
+        let applicationA = unEvedServerT a nt path (fmap (\(l :<|> _) -> l) requestData)
+            applicationB = unEvedServerT b nt path (fmap (\(_ :<|> r) -> r) requestData)
         applicationA errorHandler req resp <|> applicationB errorHandler req resp
 
     lit s next = EvedServerT $ \nt path action ->
@@ -88,7 +88,7 @@ instance Eved (EvedServerT m) m where
           x:rest ->
               case UE.fromUrlPiece el x of
                 Right arg ->
-                    unEvedServerT next nt rest $ fmap (fmap ($ arg)) action
+                    unEvedServerT next nt rest $ fmap ($ arg) action
                 Left err -> \_ _ _ -> throwIO $ CaptureError err
           _ -> \_ _ _ -> throwIO PathError
 
@@ -98,11 +98,11 @@ instance Eved (EvedServerT m) m where
               Just contentTypeBS ->
                 case CT.chooseContentCType ctypes contentTypeBS of
                       Just bodyParser ->
-                          unEvedServerT next nt path (fmap (addBodyParser bodyParser) action) errHandler req
+                          unEvedServerT next nt path (addBodyParser bodyParser action) errHandler req
                       Nothing ->
                             \_ -> throwIO NoContentMatchError
               Nothing ->
-                  unEvedServerT next nt path (fmap (addBodyParser (CT.fromContentType (NE.head ctypes))) action) errHandler req
+                  unEvedServerT next nt path (addBodyParser (CT.fromContentType (NE.head ctypes)) action) errHandler req
 
        where
             addBodyParser bodyParser action =
@@ -114,7 +114,7 @@ instance Eved (EvedServerT m) m where
        let queryText = queryToQueryText (queryString req)
            params = fromMaybe "true" . snd <$> filter (\(k, _) -> k == s) queryText
        in case QP.fromQueryParam qp params of
-            Right a  -> unEvedServerT next nt path (fmap (fmap ($a)) action) errHandler req
+            Right a  -> unEvedServerT next nt path (fmap ($a) action) errHandler req
             Left err -> \_ -> throwIO $ QueryParamParseError err
 
     verb method status ctypes = EvedServerT $ \nt path action errorHandler req resp ->
@@ -133,21 +133,22 @@ instance Eved (EvedServerT m) m where
                                   let ctype = NE.head ctypes
                                   in pure (NE.head $ CT.mediaTypes ctype, CT.toContentType ctype)
 
+
                 -- We are now committed since you can only read the body once
                 eResponseData <- handle (pure . Left) $
-                                 handle (\e@(SomeException err) -> pure $ Left $ errorHandler e) $
-                                 action >>= (\case
-                                              BodyRequestData fn -> do
-                                                  reqBody <- lazyRequestBody req
-                                                  case fn reqBody of
-                                                    Right res -> Right <$> nt res
-                                                    Left err  -> pure $ Left $ ServerError
-                                                            { errorStatus = badRequest400
-                                                            , errorBody = LBS.fromStrict $ encodeUtf8 err
-                                                            , errorHeaders = []
-                                                            }
-                                              PureRequestData a ->
-                                                  Right <$> nt a)
+                                 handle (\e@(SomeException _) -> pure $ Left $ errorHandler e) $
+                                 case action of
+                                      BodyRequestData fn -> do
+                                          reqBody <- lazyRequestBody req
+                                          case fn reqBody of
+                                            Right res -> Right <$> nt res
+                                            Left err  -> pure $ Left $ ServerError
+                                                    { errorStatus = badRequest400
+                                                    , errorBody = LBS.fromStrict $ encodeUtf8 err
+                                                    , errorHeaders = []
+                                                    }
+                                      PureRequestData a ->
+                                          Right <$> nt a
 
                 case eResponseData of
                   Right responseData ->
