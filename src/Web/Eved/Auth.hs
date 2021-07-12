@@ -67,9 +67,9 @@ instance EvedAuth Client.EvedClient where
         Client.client next $ addCredentials scheme a req
 
 instance EvedAuth (Server.EvedServerT m) where
-    auth_ schemes next = Server.EvedServerT $ \nt path action req resp ->
+    auth_ schemes next = Server.EvedServerT $ \nt path action errorHandler req resp ->
         case go req schemes of
-              AuthSuccess a -> Server.unEvedServerT next nt path (fmap (fmap ($ a)) action) req resp
+              AuthSuccess a -> Server.unEvedServerT next nt path (fmap (fmap ($ a)) action) errorHandler req resp
               _             -> resp $ Wai.responseLBS unauthorized401 [] "Method Not Allowed"
 
 
