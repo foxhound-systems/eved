@@ -8,48 +8,40 @@
 module Web.Eved.Server
     where
 
-import           Control.Applicative    ((<|>))
-import           Control.Exception      (Exception, catch, throwIO)
+import           Control.Applicative  ((<|>))
+import           Control.Exception    (Exception, catch, throwIO)
 import           Control.Monad
-import           Control.Monad.IO.Class
-import           Data.ByteString.Lazy   (ByteString)
-import qualified Data.ByteString.Lazy   as LBS
-import           Data.Functor           ((<&>))
-import qualified Data.List.NonEmpty     as NE
-import           Data.Maybe             (catMaybes, fromMaybe)
-import           Data.String            (IsString (..))
-import           Data.Text              (Text)
-import qualified Data.Text              as T
-import           Data.Text.Encoding     (decodeUtf8, encodeUtf8)
-import qualified Data.Text.Lazy         as TL
-import           Data.Void              (Void, absurd)
-import           Network.HTTP.Media     (renderHeader)
-import           Network.HTTP.Types     (badRequest400, hAccept, hContentType,
-                                         methodNotAllowed405, notAcceptable406,
-                                         notFound404, queryToQueryText,
-                                         renderStdMethod,
-                                         unsupportedMediaType415)
-import qualified Web.Eved.ContentType   as CT
+import qualified Data.ByteString.Lazy as LBS
+import qualified Data.List.NonEmpty   as NE
+import           Data.Maybe           (catMaybes, fromMaybe)
+import           Data.Text            (Text)
+import           Data.Text.Encoding   (encodeUtf8)
+import           Network.HTTP.Media   (renderHeader)
+import           Network.HTTP.Types   (badRequest400, hAccept, hContentType,
+                                       methodNotAllowed405, notAcceptable406,
+                                       notFound404, queryToQueryText,
+                                       renderStdMethod, unsupportedMediaType415)
+
+import qualified Web.Eved.ContentType as CT
 import           Web.Eved.Internal
-import qualified Web.Eved.QueryParam    as QP
-import qualified Web.Eved.UrlElement    as UE
-import qualified Web.Scotty             as Scotty
+import qualified Web.Eved.QueryParam  as QP
+import qualified Web.Eved.UrlElement  as UE
 
 
-import           Network.Wai            (Application, lazyRequestBody, pathInfo,
-                                         queryString, requestHeaders,
-                                         requestMethod, responseLBS)
+import           Network.Wai          (Application, lazyRequestBody, pathInfo,
+                                       queryString, requestHeaders,
+                                       requestMethod, responseLBS)
 
 data RequestData a
-  = BodyRequestData (ByteString -> Either Text a)
+  = BodyRequestData (LBS.ByteString -> Either Text a)
   | PureRequestData a
   deriving Functor
 
 newtype EvedServerT m a = EvedServerT
     { unEvedServerT :: (forall a. m a -> IO a) -> [Text] -> IO (RequestData a) -> Application }
 
-serverApplication :: (forall a. m a -> IO a) -> a -> EvedServerT m a -> Application
-serverApplication nt handlers api req resp =
+server :: (forall a. m a -> IO a) -> a -> EvedServerT m a -> Application
+server nt handlers api req resp =
     unEvedServerT api nt (pathInfo req) (pure (PureRequestData handlers)) req resp
         `catch` (\PathError -> resp $ responseLBS notFound404 [] "Not Found")
         `catch` (\(CaptureError err) -> resp $ responseLBS badRequest400 [] (LBS.fromStrict $ encodeUtf8 err))
@@ -155,64 +147,3 @@ instance Eved (EvedServerT m) m where
                     resp $ responseLBS badRequest400 [] (LBS.fromStrict $ encodeUtf8 err)
             _ ->
                 throwIO PathError
-
-newtype EvedScottyT m a = EvedScottyT
-    { unEvedScottyT :: (forall a. m a -> IO a) -> Text -> Scotty.ActionM a -> Scotty.ScottyM ()
-    }
-
-scottyServer :: (forall a. m a -> IO a) -> EvedScottyT m a -> a -> Scotty.ScottyM ()
-scottyServer nt scottyEved handlers =
-    unEvedScottyT scottyEved (liftIO . nt) mempty (pure handlers)
-
-instance Eved (EvedScottyT m) m where
-    a .<|> b = EvedScottyT $ \nt r action ->
-        let left = unEvedScottyT a nt r (do (f :<|> _) <- action; pure f)
-            right = unEvedScottyT b nt r (do (_ :<|> g) <- action; pure g)
-        in left <> right
-
-    lit s next = EvedScottyT $ \nt r action ->
-        unEvedScottyT next nt (r <> "/" <> s) action
-
-    capture s el next = EvedScottyT $ \nt r action ->
-        unEvedScottyT next nt (r <> "/:" <> s) $ do
-            mArg <- fmap (UE.fromUrlPiece el) $ Scotty.param $ TL.fromStrict s
-            case mArg of
-              Right arg -> fmap ($ arg) action
-              Left _    -> Scotty.next
-
-    reqBody ctypes next = EvedScottyT $ \nt r action ->
-        unEvedScottyT next nt r $ do
-            contentTypeH <- Scotty.header "Content-Type"
-            let contentTypeBS = maybe "" (encodeUtf8 . TL.toStrict) contentTypeH
-            case CT.chooseContentCType ctypes contentTypeBS of
-              Just bodyParser  -> do
-                  requestBody <- Scotty.body
-                  case bodyParser requestBody of
-                      Right a ->
-                          fmap ($ a) action
-                      Left err ->
-                          Scotty.raiseStatus badRequest400 (TL.fromStrict err)
-              Nothing ->
-                  Scotty.raiseStatus unsupportedMediaType415 ""
-
-    queryParam s qp next = EvedScottyT $ \nt r action ->
-        unEvedScottyT next nt r $ do
-            ps <- Scotty.params <&> filter (\(k, _) -> k == TL.fromStrict s)
-            let vals = fmap (TL.toStrict . snd) ps
-            case QP.fromQueryParam qp vals of
-              Right v  -> fmap ($ v) action
-              Left err -> Scotty.next
-
-    verb method status ctypes = EvedScottyT $ \nt r action ->
-        Scotty.addroute method (fromString $ T.unpack r) $ do
-            liftIO . print =<< Scotty.request
-            acceptH <- Scotty.header "Accept"
-            let acceptBS = maybe "" (encodeUtf8 . TL.toStrict) acceptH
-            case CT.chooseAcceptCType ctypes acceptBS of
-              Just (ctype, renderContent) -> do
-                  Scotty.setHeader "Content-Type" (TL.fromStrict $ decodeUtf8 $ renderHeader ctype)
-                  Scotty.status status
-                  action >>= liftIO . nt
-                         >>= Scotty.raw . renderContent
-              Nothing ->
-                  Scotty.raiseStatus notAcceptable406 mempty

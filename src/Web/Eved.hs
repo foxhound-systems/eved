@@ -24,8 +24,8 @@ module Web.Eved
     , noContext
     , withContext
     , ClientM
-    , EvedScottyT
-    , scottyServer
+    , EvedServerT
+    , server
     )
     where
 

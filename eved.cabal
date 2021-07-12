@@ -32,7 +32,6 @@ library
                      , http-client 
                      , http-api-data
                      , mtl
-                     , scotty
                      , text
                      , wai
                      , warp

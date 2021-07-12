@@ -16,7 +16,6 @@ import qualified Network.Wai         as Wai
 import qualified Web.Eved.Client     as Client
 import           Web.Eved.Internal
 import qualified Web.Eved.Server     as Server
-import qualified Web.Scotty          as Scotty
 
 auth :: (Eved api m, EvedAuth api, Applicative f)
      => NonEmpty (f (AuthScheme a)) -> f (api b) -> f (api (a -> b))
@@ -67,13 +66,11 @@ instance EvedAuth Client.EvedClient where
     auth_ (scheme :| _) next = Client.EvedClient $ \req a ->
         Client.client next $ addCredentials scheme a req
 
-instance EvedAuth (Server.EvedScottyT m) where
-    auth_ schemes next = Server.EvedScottyT $ \nt r action ->
-        Server.unEvedScottyT next nt r $ do
-            request <- Scotty.request
-            case go request schemes of
-              AuthSuccess a -> fmap ($ a) action
-              _             -> Scotty.raiseStatus unauthorized401 ""
+instance EvedAuth (Server.EvedServerT m) where
+    auth_ schemes next = Server.EvedServerT $ \nt path action req resp ->
+        case go req schemes of
+              AuthSuccess a -> Server.unEvedServerT next nt path (fmap (fmap ($ a)) action) req resp
+              _             -> resp $ Wai.responseLBS unauthorized401 [] "Method Not Allowed"
 
 
          where
