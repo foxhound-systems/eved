@@ -42,10 +42,10 @@ v1CaptureNum :<|> v1CaptureText :<|> v2CaptureText = getClient api "http://local
 import           Control.Monad.IO.Class
 import           Control.Monad.Reader
 import           Web.Eved.Server
-import           Web.Scotty
+import           Network.Wai.Handler.Warp
 
 serve :: IO ()
-serve = scotty 3000 $ scottyServer api (`runReaderT` (Env 100)) (pure handlers)
+serve = run 3000 $ server (`runReaderT` (Env 100)) handlers api
 
 data Env = Env
     { envSecret :: Integer
