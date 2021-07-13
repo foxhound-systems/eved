@@ -89,6 +89,7 @@ instance Eved (EvedServerT m) m where
         case path of
             x:rest | x == s -> unEvedServerT next nt rest action
             _               -> \_ _ -> throwIO PathError
+
     capture _s el next = EvedServerT $ \nt path action ->
         case path of
           x:rest ->
@@ -139,7 +140,6 @@ instance Eved (EvedServerT m) m where
                       Nothing ->
                           let ctype = NE.head ctypes
                           in pure (NE.head $ CT.mediaTypes ctype, CT.toContentType ctype)
-
 
         responseData <-
             case action of
