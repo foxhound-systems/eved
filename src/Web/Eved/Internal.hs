@@ -11,6 +11,7 @@ import           Data.List.NonEmpty   (NonEmpty)
 import           Data.Text            (Text)
 import           Network.HTTP.Types   (Status, StdMethod (..), status200)
 import           Web.Eved.ContentType (ContentType)
+import           Web.Eved.Header      (Header)
 import           Web.Eved.QueryParam  (QueryParam)
 import           Web.Eved.UrlElement  (UrlElement)
 
@@ -24,4 +25,5 @@ class Eved api m | api -> m where
     capture :: Text -> UrlElement a -> api b -> api (a -> b)
     reqBody :: NonEmpty (ContentType a) -> api b -> api (a -> b)
     queryParam :: Text -> QueryParam a -> api b -> api (a -> b)
+    header :: Text -> Header a -> api b -> api (a -> b)
     verb :: StdMethod -> Status -> NonEmpty (ContentType a) -> api (m a)

@@ -1,7 +1,9 @@
+{-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE TypeOperators         #-}
+
 module Web.Eved.Auth
     where
 
@@ -27,11 +29,11 @@ class EvedAuth api where
 
 data AuthResult a
     = AuthSuccess a
-    | AuthFailure
+    | AuthFailure Text
     | AuthNeeded
 
 data AuthScheme a = AuthScheme
-    { authenticateRequest :: Wai.Request -> AuthResult a
+    { authenticateRequest :: Wai.Request -> IO (AuthResult a)
     , addCredentials      :: a -> HTTP.Request -> HTTP.Request
     }
 
@@ -50,11 +52,11 @@ basicAuth = AuthScheme
             if T.toLower authType == "basic" then
                let (username, rest') = T.breakOn ":" $ T.strip rest
                    password = T.drop 1 rest'
-               in AuthSuccess (BasicAuth username password)
+               in pure $ AuthSuccess (BasicAuth username password)
             else
-               AuthNeeded
+               pure AuthNeeded
           Nothing ->
-              AuthNeeded
+              pure AuthNeeded
     , addCredentials = \creds ->
         HTTP.applyBasicAuth
             (encodeUtf8 $ basicAuthUsername creds)
@@ -68,14 +70,16 @@ instance EvedAuth Client.EvedClient where
 
 instance EvedAuth (Server.EvedServerT m) where
     auth_ schemes next = Server.EvedServerT $ \nt path action req resp ->
-        case go req schemes of
+        go req schemes >>= \case
               AuthSuccess a -> Server.unEvedServerT next nt path (fmap ($ a) action) req resp
               _             -> resp $ Wai.responseLBS unauthorized401 [] "Unauthorized"
 
 
          where
              go request (s :| rest) =
-                 case authenticateRequest s request of
-                   AuthSuccess a -> AuthSuccess a
-                   AuthFailure -> AuthFailure
-                   AuthNeeded -> maybe AuthFailure (go request) (nonEmpty rest)
+                 authenticateRequest s request >>= \case
+                   AuthSuccess a -> pure $ AuthSuccess a
+                   AuthFailure err -> pure $ AuthFailure err
+                   AuthNeeded -> maybe (pure $ AuthFailure "No matching AuthScheme found")
+                                       (go request)
+                                       (nonEmpty rest)

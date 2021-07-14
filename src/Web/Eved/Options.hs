@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE KindSignatures        #-}
+{-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings     #-}
 
@@ -20,7 +21,7 @@ provideOptions api app req respond
 
 getOptionsResponse :: EvedOptions m a -> Request -> Response
 getOptionsResponse api req =
-    let methods = fmap renderStdMethod $ getAvailableMethods api (pathInfo req)
+    let methods = renderStdMethod <$> getAvailableMethods api (pathInfo req)
         headers = [ ("Allow", B.intercalate ", " $ "OPTIONS":methods) ]
     in responseBuilder status200 headers mempty
 
@@ -35,20 +36,18 @@ instance Eved (EvedOptions m) m where
     left .<|> right = EvedOptions $ \path ->
         getAvailableMethods left path <> getAvailableMethods right path
 
-    lit t next = EvedOptions $ \path ->
-        case path of
-          p:rest | p == t -> getAvailableMethods next rest
-          _               -> mempty
+    lit t next = EvedOptions $ \case
+        p:rest | p == t -> getAvailableMethods next rest
+        _               -> mempty
 
-    capture _ _ next = EvedOptions $ \path ->
-        case path of
-          _:rest -> getAvailableMethods next rest
-          _      -> mempty
+    capture _ _ next = EvedOptions $ \case
+        _:rest -> getAvailableMethods next rest
+        _      -> mempty
 
     reqBody _ = passthrough
     queryParam _ _ = passthrough
-    verb method _ _ = EvedOptions $ \path ->
-        case path of
-          [] -> [method]
-          _  -> mempty
+    header _ _ = passthrough
+    verb method _ _ = EvedOptions $ \case
+        [] -> [method]
+        _  -> mempty
 

@@ -4,12 +4,13 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE RankNTypes            #-}
+{-# LANGUAGE TupleSections         #-}
 {-# LANGUAGE TypeApplications      #-}
 
 module Web.Eved.Server
     where
 
-import           Control.Applicative  ((<|>))
+import           Control.Applicative  ((<*))
 import           Control.Exception    (Exception, SomeException (..), catch,
                                        handle, throwIO, try)
 import           Control.Monad
@@ -25,7 +26,9 @@ import           Network.HTTP.Types   (Header, Status, badRequest400, hAccept,
                                        notFound404, queryToQueryText,
                                        renderStdMethod, unsupportedMediaType415)
 
+import qualified Data.CaseInsensitive as CI
 import qualified Web.Eved.ContentType as CT
+import qualified Web.Eved.Header      as H
 import           Web.Eved.Internal
 import qualified Web.Eved.QueryParam  as QP
 import qualified Web.Eved.UrlElement  as UE
@@ -43,7 +46,6 @@ data RequestData a
 newtype EvedServerT m a = EvedServerT
     { unEvedServerT :: (forall a. m a -> IO a) -> [Text] -> RequestData a -> Application }
 
-
 server :: (forall a. m a -> IO a) -> a -> EvedServerT m a -> Application
 server nt handlers api req resp =
     unEvedServerT api nt (pathInfo req) (PureRequestData handlers) req resp
@@ -60,6 +62,7 @@ server nt handlers api req resp =
 data RoutingError
     = PathError
     | CaptureError Text
+    | HeaderParseError Text
     | QueryParamParseError Text
     | NoContentMatchError
     | NoAcceptMatchError
@@ -103,19 +106,19 @@ instance Eved (EvedServerT m) m where
         let mContentTypeBS = lookup hContentType $ requestHeaders req
         case mContentTypeBS of
               Just contentTypeBS ->
-                case CT.chooseContentCType ctypes contentTypeBS of
+                case CT.chooseContentCType ctypes mempty contentTypeBS of
                       Just bodyParser ->
                           unEvedServerT next nt path (addBodyParser bodyParser action) req
                       Nothing ->
                             \_ -> throwIO NoContentMatchError
               Nothing ->
-                  unEvedServerT next nt path (addBodyParser (CT.fromContentType (NE.head ctypes)) action) req
+                  unEvedServerT next nt path (addBodyParser (CT.fromContentType (NE.head ctypes) . (mempty,)) action) req
 
        where
             addBodyParser bodyParser action =
                 case action of
                   BodyRequestData fn -> BodyRequestData $ \bodyText -> fn bodyText <*> bodyParser bodyText
-                  PureRequestData v -> BodyRequestData $ \bodyText -> v <$> bodyParser bodyText
+                  PureRequestData v -> BodyRequestData (fmap v . bodyParser)
 
     queryParam s qp next = EvedServerT $ \nt path action req ->
        let queryText = queryToQueryText (queryString req)
@@ -123,6 +126,13 @@ instance Eved (EvedServerT m) m where
        in case QP.fromQueryParam qp params of
             Right a  -> unEvedServerT next nt path (fmap ($a) action) req
             Left err -> \_ -> throwIO $ QueryParamParseError err
+
+    header headerName h next = EvedServerT $ \nt path action req ->
+       let ciHeaderName = CI.mk (encodeUtf8 headerName)
+           mHeader = lookup ciHeaderName (requestHeaders req)
+       in case H.fromHeaderValue h mHeader of
+          Right a  -> unEvedServerT next nt path (fmap ($ a) action) req
+          Left err -> \_ -> throwIO $ HeaderParseError err
 
     verb method status ctypes = EvedServerT $ \nt path action req resp -> do
         unless (null path) $
@@ -141,7 +151,7 @@ instance Eved (EvedServerT m) m where
                           let ctype = NE.head ctypes
                           in pure (NE.head $ CT.mediaTypes ctype, CT.toContentType ctype)
 
-        responseData <-
+        (rHeaders, rBody) <- renderContent <$>
             case action of
                 BodyRequestData fn -> do
                     reqBody <- lazyRequestBody req
@@ -157,7 +167,7 @@ instance Eved (EvedServerT m) m where
                 PureRequestData a ->
                     nt a `catch` (\(SomeException e) -> throwIO $ UserApplicationError e)
 
-        resp $ responseLBS status [(hContentType, renderHeader ctype)] (renderContent responseData)
+        resp $ responseLBS status ((hContentType, renderHeader ctype):rHeaders) rBody
 
 serverErrorToResponse :: ServerError -> Response
 serverErrorToResponse err =

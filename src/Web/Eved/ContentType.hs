@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections     #-}
 module Web.Eved.ContentType
     where
 
@@ -15,17 +16,30 @@ import           Network.HTTP.Media
 import           Network.HTTP.Types
 
 data ContentType a = ContentType
-    { toContentType   :: a -> LBS.ByteString
-    , fromContentType :: LBS.ByteString -> Either Text a
+    { toContentType   :: a -> (RequestHeaders, LBS.ByteString)
+    , fromContentType :: (RequestHeaders, LBS.ByteString) -> Either Text a
     , mediaTypes      :: NonEmpty MediaType
     }
 
 json :: (FromJSON a, ToJSON a, Applicative f) => f (ContentType a)
 json = pure $ ContentType
-    { toContentType = encode
-    , fromContentType = first T.pack . eitherDecode
+    { toContentType = (mempty,) . encode
+    , fromContentType = first T.pack . eitherDecode . snd
     , mediaTypes = NE.fromList ["application" // "json"]
     }
+
+data WithHeaders a = WithHeaders RequestHeaders a
+
+addHeaders :: RequestHeaders -> a -> WithHeaders a
+addHeaders = WithHeaders
+
+withHeaders :: Functor f => f (ContentType a) -> f (ContentType (WithHeaders a))
+withHeaders = fmap $ \ctype ->
+    ContentType
+        { toContentType = \(WithHeaders rHeaders val) -> (rHeaders, snd $ toContentType ctype val)
+        , fromContentType = \(rHeaders, rBody) -> fmap (WithHeaders rHeaders) (fromContentType ctype (mempty, rBody))
+        , mediaTypes = mediaTypes ctype
+        }
 
 acceptHeader :: NonEmpty (ContentType a) -> Header
 acceptHeader ctypes = (hAccept, renderHeader $ NE.toList $ mediaTypes =<< ctypes)
@@ -39,10 +53,10 @@ collectMediaTypes f ctypes =
       fmap (f ctype) (mediaTypes ctype)
     )
 
-chooseAcceptCType :: NonEmpty (ContentType a) -> BS.ByteString -> Maybe (MediaType, a -> LBS.ByteString)
+chooseAcceptCType :: NonEmpty (ContentType a) -> BS.ByteString -> Maybe (MediaType, a -> (RequestHeaders, LBS.ByteString))
 chooseAcceptCType ctypes =
     mapAcceptMedia $ collectMediaTypes (\ctype x -> (x, (x, toContentType ctype))) ctypes
 
-chooseContentCType :: NonEmpty (ContentType a) -> BS.ByteString -> Maybe (LBS.ByteString -> Either Text a)
-chooseContentCType ctypes =
-    mapContentMedia $ collectMediaTypes (\ctype x -> (x, fromContentType ctype)) ctypes
+chooseContentCType :: NonEmpty (ContentType a) -> RequestHeaders -> BS.ByteString -> Maybe (LBS.ByteString -> Either Text a)
+chooseContentCType ctypes rHeaders =
+    mapContentMedia $ collectMediaTypes (\ctype x -> (x, fromContentType ctype . (rHeaders,))) ctypes
