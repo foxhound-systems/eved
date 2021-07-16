@@ -15,6 +15,7 @@ import           Control.Exception    (Exception, SomeException (..), catch,
                                        handle, throwIO, try)
 import           Control.Monad
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.List            as List
 import qualified Data.List.NonEmpty   as NE
 import           Data.Maybe           (catMaybes, fromMaybe)
 import           Data.Text            (Text)
@@ -48,7 +49,7 @@ newtype EvedServerT m a = EvedServerT
 
 server :: (forall a. m a -> IO a) -> a -> EvedServerT m a -> Application
 server nt handlers api req resp =
-    unEvedServerT api nt (pathInfo req) (PureRequestData handlers) req resp
+    unEvedServerT api nt (List.dropWhileEnd (== "") (pathInfo req)) (PureRequestData handlers) req resp
         `catch` (\case
             PathError -> resp $ responseLBS notFound404 [] "Not Found"
             CaptureError err -> resp $ responseLBS badRequest400 [] (LBS.fromStrict $ encodeUtf8 err)

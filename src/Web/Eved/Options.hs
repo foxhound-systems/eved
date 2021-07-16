@@ -9,6 +9,7 @@ module Web.Eved.Options
 
 import qualified Data.ByteString    as B
 import           Data.Coerce        (coerce)
+import qualified Data.List          as List
 import           Data.Text          (Text)
 import           Network.HTTP.Types
 import           Network.Wai
@@ -21,7 +22,7 @@ provideOptions api app req respond
 
 getOptionsResponse :: EvedOptions m a -> Request -> Response
 getOptionsResponse api req =
-    let methods = renderStdMethod <$> getAvailableMethods api (pathInfo req)
+    let methods = renderStdMethod <$> getAvailableMethods api (List.dropWhileEnd (== "") (pathInfo req))
         headers = [ ("Allow", B.intercalate ", " $ "OPTIONS":methods) ]
     in responseBuilder status200 headers mempty
 
