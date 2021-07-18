@@ -152,21 +152,24 @@ instance Eved (EvedServerT m) m where
                           let ctype = NE.head ctypes
                           in pure (NE.head $ CT.mediaTypes ctype, CT.toContentType ctype)
 
-        (rHeaders, rBody) <- renderContent <$>
-            case action of
-                BodyRequestData fn -> do
-                    reqBody <- lazyRequestBody req
-                    case fn reqBody of
-                        Right res ->
-                            nt res `catch` (\(SomeException e) -> throwIO $ UserApplicationError e)
-                        Left err ->
-                            throwIO $ ServerError
-                              { errorStatus = badRequest400
-                              , errorBody = LBS.fromStrict $ encodeUtf8 err
-                              , errorHeaders = []
-                              }
-                PureRequestData a ->
-                    nt a `catch` (\(SomeException e) -> throwIO $ UserApplicationError e)
+        (rHeaders, rBody) <-
+                    renderContent <$>
+                        case action of
+                            BodyRequestData fn -> do
+                                reqBody <- lazyRequestBody req
+                                case fn reqBody of
+                                    Right res ->
+                                        nt res
+                                    Left err ->
+                                        throwIO $ ServerError
+                                          { errorStatus = badRequest400
+                                          , errorBody = LBS.fromStrict $ encodeUtf8 err
+                                          , errorHeaders = []
+                                          }
+                            PureRequestData a ->
+                                nt a
+               `catch` (throwIO @ServerError)
+               `catch` (\(SomeException e) -> throwIO $ UserApplicationError e)
 
         resp $ responseLBS status ((hContentType, renderHeader ctype):rHeaders) rBody
 

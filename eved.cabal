@@ -1,5 +1,5 @@
 name:                eved
-version:             0.0.2.1
+version:             0.0.3.0
 synopsis:            A value level web framework
 description:         A value level web framework in the style of servant
 homepage:            https://github.com/foxhound-systems/eved#readme
