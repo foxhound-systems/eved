@@ -58,6 +58,7 @@ server nt handlers api req resp =
             NoAcceptMatchError -> resp $ responseLBS notAcceptable406 [] "Not Acceptable"
             NoMethodMatchError -> resp $ responseLBS methodNotAllowed405 [] "Method Not Allowed")
         `catch` (resp . serverErrorToResponse)
+        `catch` (\(UserApplicationError err) -> resp $ serverErrorToResponse err)
         `catch` (\(UserApplicationError err) -> resp $ serverErrorToResponse $ defaultErrorHandler err)
 
 data RoutingError
@@ -168,7 +169,6 @@ instance Eved (EvedServerT m) m where
                                           }
                             PureRequestData a ->
                                 nt a
-               `catch` (throwIO @ServerError)
                `catch` (\(SomeException e) -> throwIO $ UserApplicationError e)
 
         resp $ responseLBS status ((hContentType, renderHeader ctype):rHeaders) rBody
