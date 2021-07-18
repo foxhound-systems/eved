@@ -47,8 +47,23 @@ data RequestData a
 newtype EvedServerT m a = EvedServerT
     { unEvedServerT :: (forall a. m a -> IO a) -> [Text] -> RequestData a -> Application }
 
-server :: (forall a. m a -> IO a) -> a -> EvedServerT m a -> Application
-server nt handlers api req resp =
+simpleServer :: a -> EvedServerT IO a -> Application
+simpleServer =
+    server id
+
+server :: (forall a. m a -> IO a)
+       -> a
+       -> EvedServerT m a
+       -> Application
+server = hoistServerWithErrorHandler defaultErrorHandler
+
+hoistServerWithErrorHandler
+        :: (SomeException -> ServerError)
+        -> (forall a. m a -> IO a)
+        -> a
+        -> EvedServerT m a
+        -> Application
+hoistServerWithErrorHandler errorHandler nt handlers api req resp =
     unEvedServerT api nt (List.dropWhileEnd (== "") (pathInfo req)) (PureRequestData handlers) req resp
         `catch` (\case
             PathError -> resp $ responseLBS notFound404 [] "Not Found"
@@ -59,7 +74,7 @@ server nt handlers api req resp =
             NoMethodMatchError -> resp $ responseLBS methodNotAllowed405 [] "Method Not Allowed")
         `catch` (resp . serverErrorToResponse)
         `catch` (\(UserApplicationError err) -> resp $ serverErrorToResponse err)
-        `catch` (\(UserApplicationError err) -> resp $ serverErrorToResponse $ defaultErrorHandler err)
+        `catch` (\(UserApplicationError err) -> resp $ serverErrorToResponse $ errorHandler err)
 
 data RoutingError
     = PathError
