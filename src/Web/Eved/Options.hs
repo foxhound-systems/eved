@@ -3,6 +3,7 @@
 {-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE TypeFamilies          #-}
 
 module Web.Eved.Options
     where
@@ -10,6 +11,7 @@ module Web.Eved.Options
 import qualified Data.ByteString    as B
 import           Data.Coerce        (coerce)
 import qualified Data.List          as List
+import           Data.Proxy         (Proxy)
 import           Data.Text          (Text)
 import           Network.HTTP.Types
 import           Network.Wai
@@ -34,6 +36,10 @@ passthrough :: EvedOptions m a -> EvedOptions m b
 passthrough = coerce
 
 instance Eved (EvedOptions m) m where
+    type UrlElement _ = Proxy
+    type ContentType _ = Proxy
+    type QueryParam _ = Proxy
+
     left .<|> right = EvedOptions $ \path ->
         getAvailableMethods left path <> getAvailableMethods right path
 

@@ -6,6 +6,7 @@
 {-# LANGUAGE RankNTypes            #-}
 {-# LANGUAGE TupleSections         #-}
 {-# LANGUAGE TypeApplications      #-}
+{-# LANGUAGE TypeFamilies          #-}
 
 module Web.Eved.Server
     where
@@ -93,6 +94,10 @@ instance Exception RoutingError
 instance Exception a => Exception (UserApplicationError a)
 
 instance Eved (EvedServerT m) m where
+    type UrlElement (EvedServerT m) = UE.FromUrlElement
+    type ContentType (EvedServerT m) = CT.ContentType
+    type QueryParam (EvedServerT m) = QP.FromQueryParam
+
     a .<|> b = EvedServerT $ \nt path requestData req resp -> do
         let applicationA = unEvedServerT a nt path (fmap (\(l :<|> _) -> l) requestData)
             applicationB = unEvedServerT b nt path (fmap (\(_ :<|> r) -> r) requestData)

@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE TypeFamilies          #-}
 
 module Web.Eved.Client
     where
@@ -42,6 +43,10 @@ getClient :: EvedClient a -> Text -> a
 getClient (EvedClient f) = f . HttpClient.parseRequest_ . T.unpack
 
 instance Eved EvedClient ClientM where
+    type UrlElement EvedClient = UE.ToUrlElement
+    type ContentType EvedClient = CT.ContentType
+    type QueryParam EvedClient = QP.ToQueryParam
+
     l .<|> r = EvedClient $ \req ->
         client l req :<|> client r req
 
